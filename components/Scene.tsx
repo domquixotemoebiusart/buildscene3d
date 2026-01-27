@@ -62,12 +62,22 @@ export default function Scene({ modelPaths }: SceneProps) {
   const [debugInfo, setDebugInfo] = useState<DebugInfo>(debugInfoRef.current);
   const [showCameraPrompt, setShowCameraPrompt] = useState(true);
   const [showDebugOverlay, setShowDebugOverlay] = useState(true);
-  const [sceneEnabled, setSceneEnabled] = useState(true); // Controla se a cena está ativa
+  const [sceneEnabled, setSceneEnabled] = useState(false); // Controla se a cena está ativa (inicia desabilitada)
   const deviceMotionRef = useRef({ x: 0, y: 0, z: 0 });
   const initialOrientationRef = useRef({ alpha: 0, beta: 0, gamma: 0 });
   const isInitialOrientationSet = useRef(false);
   const sceneInitialized = useRef(false); // Flag para prevenir múltiplas inicializações
+  const sceneHasStartedOnce = useRef(false); // Flag para controlar se a cena já foi iniciada uma vez
   const cleanupFunctionsRef = useRef<(() => void)[]>([]); // Ref para funções de cleanup
+  const [savedCameras, setSavedCameras] = useState<Array<{
+    id: number;
+    name: string;
+    position: { x: number; y: number; z: number };
+    rotation: { x: number; y: number; z: number };
+    lookAt: { x: number; y: number; z: number };
+  }>>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const activeCameraRef = useRef<any>(null); // Ref para a câmera ativa
 
   // Função para atualizar a posição de um objeto com smooth transition
   const updateObjectPosition = (objectName: string, axis: 'x' | 'y' | 'z', value: number) => {
@@ -100,6 +110,80 @@ export default function Scene({ modelPaths }: SceneProps) {
     } else {
       console.error(`❌ Objeto não encontrado: ${objectName}`);
     }
+  };
+
+  // Função para atualizar a rotação de um objeto
+  const updateObjectRotation = (objectName: string, axis: 'x' | 'y' | 'z', degrees: number) => {
+    const objData = sceneObjectsRef.current.find(obj => obj.name === objectName);
+    if (objData) {
+      const radians = degrees * (Math.PI / 180);
+      objData.object.rotation[axis] = radians;
+      console.log(`🔄 Rotação: ${objectName} - ${axis.toUpperCase()}: ${degrees}°`);
+    } else {
+      console.error(`❌ Objeto não encontrado: ${objectName}`);
+    }
+  };
+
+  // Função para salvar posição da câmera atual
+  const saveCamera = () => {
+    if (!activeCameraRef.current) {
+      console.error('❌ Nenhuma câmera ativa disponível');
+      return;
+    }
+
+    if (savedCameras.length >= 4) {
+      console.warn('⚠️ Limite de 4 câmeras atingido');
+      return;
+    }
+
+    const camera = activeCameraRef.current;
+    const direction = camera.position.clone();
+    
+    const newCamera = {
+      id: Date.now(),
+      name: `Camera ${savedCameras.length + 1}`,
+      position: {
+        x: parseFloat(camera.position.x.toFixed(2)),
+        y: parseFloat(camera.position.y.toFixed(2)),
+        z: parseFloat(camera.position.z.toFixed(2)),
+      },
+      rotation: {
+        x: parseFloat((camera.rotation.x * 180 / Math.PI).toFixed(1)),
+        y: parseFloat((camera.rotation.y * 180 / Math.PI).toFixed(1)),
+        z: parseFloat((camera.rotation.z * 180 / Math.PI).toFixed(1)),
+      },
+      lookAt: {
+        x: debugInfo.lookAt.x,
+        y: debugInfo.lookAt.y,
+        z: debugInfo.lookAt.z,
+      },
+    };
+
+    setSavedCameras([...savedCameras, newCamera]);
+    console.log('📷 Câmera salva:', newCamera);
+  };
+
+  // Função para aplicar posição de câmera salva
+  const applySavedCamera = (cameraData: typeof savedCameras[0]) => {
+    if (!activeCameraRef.current) {
+      console.error('❌ Nenhuma câmera ativa disponível');
+      return;
+    }
+
+    const camera = activeCameraRef.current;
+    camera.position.set(cameraData.position.x, cameraData.position.y, cameraData.position.z);
+    camera.rotation.set(
+      cameraData.rotation.x * (Math.PI / 180),
+      cameraData.rotation.y * (Math.PI / 180),
+      cameraData.rotation.z * (Math.PI / 180)
+    );
+    console.log('📷 Câmera aplicada:', cameraData.name);
+  };
+
+  // Função para deletar câmera salva
+  const deleteSavedCamera = (id: number) => {
+    setSavedCameras(savedCameras.filter(cam => cam.id !== id));
+    console.log('🗑️ Câmera deletada:', id);
   };
 
   // Função para limpar e recarregar a cena
@@ -444,16 +528,9 @@ export default function Scene({ modelPaths }: SceneProps) {
     console.log('✅ Limpeza de múltiplas cenas e duplicados concluída');
   };
 
-  // useEffect para monitorar mudanças no sceneEnabled
   useEffect(() => {
-    if (!sceneEnabled) {
-      console.log('🛑 Cena desabilitada. Executando limpeza...');
-      reloadScene();
-    }
-  }, [sceneEnabled]);
-
-  useEffect(() => {
-    if (!containerRef.current || modelPaths.length === 0 || !sceneEnabled) return;
+    // Só inicia a cena se sceneEnabled for true, ainda não foi inicializada E não iniciou antes
+    if (!containerRef.current || modelPaths.length === 0 || !sceneEnabled || sceneHasStartedOnce.current) return;
 
     console.log('🔄 useEffect executado. ModelPaths:', modelPaths);
     console.log('🚦 sceneInitialized.current:', sceneInitialized.current);
@@ -468,7 +545,9 @@ export default function Scene({ modelPaths }: SceneProps) {
     }
     
     sceneInitialized.current = true;
+    sceneHasStartedOnce.current = true; // Marca que a cena já foi iniciada uma vez
     console.log('✅ Flag sceneInitialized definida como true');
+    console.log('✅ Flag sceneHasStartedOnce definida como true - cena não reiniciará');
     
     // Reset estado de carregamento
     setObjectsLoaded(false);
@@ -540,6 +619,7 @@ export default function Scene({ modelPaths }: SceneProps) {
         camera.position.set(0, -8, 0); // Posição ajustada para visão de cima
         camera.up.set(0, 0, 1); // Define Z como up
         camera.lookAt(0, 0, 0); // Olha para o centro da cena
+        activeCameraRef.current = camera; // Armazena câmera principal como ativa
 
         // 📱 Câmera 02 - AR Camera (câmera traseira do celular)
         // Valores realistas baseados em câmeras de smartphone
@@ -1134,11 +1214,12 @@ export default function Scene({ modelPaths }: SceneProps) {
 
       {/* Botão para alternar câmera */}
       <div className="absolute top-2 left-2 z-50 flex gap-2 flex-wrap">
-        {/* Checkbox para habilitar/desabilitar loop da cena */}
-        <label className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-semibold text-sm shadow-lg transition-colors flex items-center gap-2 cursor-pointer">
+        {/* Checkbox para iniciar a cena - fica marcado e desabilitado após primeira ativação */}
+        <label className={`${sceneEnabled ? 'bg-green-500' : 'bg-gray-500 hover:bg-green-600 cursor-pointer'} text-white px-4 py-2 rounded-lg font-semibold text-sm shadow-lg transition-colors flex items-center gap-2`}>
           <input
             type="checkbox"
             checked={sceneEnabled}
+            disabled={sceneEnabled} // Desabilita após ser marcado
             onChange={(e) => {
               const enabled = e.target.checked;
               console.log(`🔄 Cena ${enabled ? 'habilitada' : 'desabilitada'}`);
@@ -1146,7 +1227,7 @@ export default function Scene({ modelPaths }: SceneProps) {
             }}
             className="w-4 h-4"
           />
-          <span>{sceneEnabled ? '✅ Cena Ativa' : '⏸️ Cena Pausada'}</span>
+          <span>{sceneEnabled ? '✅ Cena Ativa' : '▶️ Iniciar Cena'}</span>
         </label>
         
         <button
@@ -1222,7 +1303,48 @@ export default function Scene({ modelPaths }: SceneProps) {
           <p className="ml-2">X: {debugInfo.lookAt.x}</p>
           <p className="ml-2">Y: {debugInfo.lookAt.y}</p>
           <p className="ml-2">Z: {debugInfo.lookAt.z}</p>
+          
+          {/* Botão para salvar câmera */}
+          <button
+            onClick={saveCamera}
+            disabled={savedCameras.length >= 4}
+            className={`mt-2 w-full py-1 px-2 rounded text-[9px] font-semibold ${
+              savedCameras.length >= 4 
+                ? 'bg-gray-500 cursor-not-allowed' 
+                : 'bg-green-500 hover:bg-green-600'
+            }`}
+          >
+            💾 Salvar Câmera ({savedCameras.length}/4)
+          </button>
         </div>
+
+        {/* Saved Cameras */}
+        {savedCameras.length > 0 && (
+          <div className="mb-3 border-b border-white/20 pb-2">
+            <p className="font-semibold text-green-300 mb-2">📷 Câmeras Salvas:</p>
+            {savedCameras.map((cam) => (
+              <div key={cam.id} className="mb-2 p-2 bg-white/5 rounded border border-green-500/30">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-[10px] font-semibold text-green-300">{cam.name}</p>
+                  <button
+                    onClick={() => deleteSavedCamera(cam.id)}
+                    className="text-[9px] text-red-400 hover:text-red-300"
+                  >
+                    🗑️
+                  </button>
+                </div>
+                <p className="text-[9px] text-gray-400">Pos: ({cam.position.x}, {cam.position.y}, {cam.position.z})</p>
+                <p className="text-[9px] text-gray-400">Rot: ({cam.rotation.x}°, {cam.rotation.y}°, {cam.rotation.z}°)</p>
+                <button
+                  onClick={() => applySavedCamera(cam)}
+                  className="mt-1 w-full py-1 px-2 bg-blue-500 hover:bg-blue-600 rounded text-[9px] font-semibold"
+                >
+                  ▶️ Aplicar
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Viewport Info */}
         <div className="mb-3 border-b border-white/20 pb-2">
@@ -1321,9 +1443,39 @@ export default function Scene({ modelPaths }: SceneProps) {
                   />
                 </div>
                 <p className="text-[9px] text-gray-300 mt-1">Rotação (graus):</p>
-                <p className="ml-2 text-[9px]">X: {obj.rotation.x}°</p>
-                <p className="ml-2 text-[9px]">Y: {obj.rotation.y}°</p>
-                <p className="ml-2 text-[9px]">Z: {obj.rotation.z}°</p>
+                <div className="ml-2 flex items-center gap-1">
+                  <span className="text-[9px] w-6">X:</span>
+                  <input 
+                    type="number" 
+                    step="1"
+                    defaultValue={obj.rotation.x}
+                    onChange={(e) => updateObjectRotation(obj.name, 'x', parseFloat(e.target.value) || 0)}
+                    className="w-14 bg-white/10 border border-white/20 rounded px-1 text-[9px] text-white"
+                  />
+                  <span className="text-[9px] text-white/60">°</span>
+                </div>
+                <div className="ml-2 flex items-center gap-1">
+                  <span className="text-[9px] w-6">Y:</span>
+                  <input 
+                    type="number" 
+                    step="1"
+                    defaultValue={obj.rotation.y}
+                    onChange={(e) => updateObjectRotation(obj.name, 'y', parseFloat(e.target.value) || 0)}
+                    className="w-14 bg-white/10 border border-white/20 rounded px-1 text-[9px] text-white"
+                  />
+                  <span className="text-[9px] text-white/60">°</span>
+                </div>
+                <div className="ml-2 flex items-center gap-1">
+                  <span className="text-[9px] w-6">Z:</span>
+                  <input 
+                    type="number" 
+                    step="1"
+                    defaultValue={obj.rotation.z}
+                    onChange={(e) => updateObjectRotation(obj.name, 'z', parseFloat(e.target.value) || 0)}
+                    className="w-14 bg-white/10 border border-white/20 rounded px-1 text-[9px] text-white"
+                  />
+                  <span className="text-[9px] text-white/60">°</span>
+                </div>
               </div>
             ))
           )}
