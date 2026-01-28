@@ -1,7 +1,7 @@
 
 'use client';
 import * as THREE from 'three';
-import { EffectComposer, RenderPass, ShaderPass } from 'three-stdlib';
+import { EffectComposer, RenderPass, ShaderPass, UnrealBloomPass } from 'three-stdlib';
 
 import { useEffect, useRef, useState } from 'react';
 
@@ -136,6 +136,11 @@ export default function Scene({ modelPaths, texturePath }: SceneProps) {
   const [vignetteOffset, setVignetteOffset] = useState(1.1);
   const [vignetteDarkness, setVignetteDarkness] = useState(1.3);
   const vignettePassRef = useRef<ShaderPass | null>(null);
+  // Bloom
+  const [bloomEnabled, setBloomEnabled] = useState(true);
+  const [bloomIntensity, setBloomIntensity] = useState(1.5);
+  const [bloomThreshold, setBloomThreshold] = useState(0.2);
+  const bloomPassRef = useRef<UnrealBloomPass | null>(null);
   // Luzes
   const [ambientIntensity, setAmbientIntensity] = useState(1.5);
   const [pointIntensity, setPointIntensity] = useState(2);
@@ -178,6 +183,33 @@ export default function Scene({ modelPaths, texturePath }: SceneProps) {
     console.log('Total de luzes:', lightsInfo.length);
     console.groupEnd();
   }, [ambientIntensity, pointIntensity, directionalIntensity]);
+
+  // Desativa bloom quando AR camera está ativa
+  useEffect(() => {
+    if (bloomPassRef.current) {
+      if (useARCamera) {
+        bloomPassRef.current.enabled = false;
+        console.log('🌟 Bloom desativado (AR Camera ativa)');
+      } else if (bloomEnabled) {
+        bloomPassRef.current.enabled = true;
+        console.log('🌟 Bloom ativado');
+      }
+    }
+  }, [useARCamera, bloomEnabled]);
+
+  // Atualiza intensidade do bloom
+  useEffect(() => {
+    if (bloomPassRef.current && !useARCamera) {
+      bloomPassRef.current.strength = bloomIntensity;
+    }
+  }, [bloomIntensity, useARCamera]);
+
+  // Atualiza threshold do bloom
+  useEffect(() => {
+    if (bloomPassRef.current && !useARCamera) {
+      bloomPassRef.current.threshold = bloomThreshold;
+    }
+  }, [bloomThreshold, useARCamera]);
 
   useEffect(() => {
     sceneObjectsRef.current.forEach(obj => {
@@ -1168,6 +1200,18 @@ export default function Scene({ modelPaths, texturePath }: SceneProps) {
         const composer = new EffectComposer(renderer);
         composer.addPass(new RenderPass(scene, camera));
         
+        // Bloom Pass (UnrealBloomPass)
+        const bloomPass = new UnrealBloomPass(
+          new THREE.Vector2(window.innerWidth, window.innerHeight),
+          bloomIntensity,
+          bloomThreshold,
+          0.85
+        );
+        bloomPass.enabled = bloomEnabled && !useARCamera;
+        bloomPassRef.current = bloomPass;
+        composer.addPass(bloomPass);
+        console.log('🌟 Bloom effect adicionado');
+        
         const vignettePass = new ShaderPass(VignetteShader);
         vignettePass.uniforms['offset'].value = vignetteOffset;   // tamanho da vignette
         vignettePass.uniforms['darkness'].value = vignetteDarkness; // intensidade do escurecimento
@@ -1911,7 +1955,66 @@ export default function Scene({ modelPaths, texturePath }: SceneProps) {
           </div>
         </div>
 
-
+        {/* Bloom Controls */}
+        <div className="mb-3 border-b border-white/20 pb-2">
+          <p className="font-semibold text-yellow-400 mb-2">🌟 Bloom Effect:</p>
+          
+          {useARCamera && (
+            <p className="text-[9px] text-orange-300 mb-2 bg-orange-500/20 p-1 rounded">
+              ⚠️ Desativado na câmera AR
+            </p>
+          )}
+          
+          <div className="mb-2">
+            <div className="flex items-center gap-2 mb-2">
+              <input 
+                type="checkbox"
+                checked={bloomEnabled && !useARCamera}
+                onChange={(e) => setBloomEnabled(e.target.checked)}
+                disabled={useARCamera}
+                className="w-3 h-3"
+                id="bloom-toggle"
+              />
+              <label htmlFor="bloom-toggle" className="text-[10px] text-gray-300">
+                Ativar Bloom {useARCamera ? '(desabilitado em AR)' : ''}
+              </label>
+            </div>
+          </div>
+          
+          {bloomEnabled && !useARCamera && (
+            <>
+              <div className="mb-2">
+                <label className="text-[10px] text-gray-300 mb-1 block">
+                  Intensidade: {bloomIntensity.toFixed(2)}
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="5"
+                  step="0.1"
+                  value={bloomIntensity}
+                  onChange={(e) => setBloomIntensity(parseFloat(e.target.value))}
+                  className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer"
+                />
+              </div>
+              
+              <div>
+                <label className="text-[10px] text-gray-300 mb-1 block">
+                  Threshold: {bloomThreshold.toFixed(2)}
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={bloomThreshold}
+                  onChange={(e) => setBloomThreshold(parseFloat(e.target.value))}
+                  className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer"
+                />
+              </div>
+            </>
+          )}
+        </div>
 
         {/* Background Texture Control */}
         {texturePath && (
