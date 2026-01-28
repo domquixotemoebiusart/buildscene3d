@@ -972,8 +972,8 @@ export default function Scene({ modelPaths, texturePath }: SceneProps) {
           0.1,
           1000
         );
-        camera.position.set(0, -8, 0); // Posição ajustada para visão de cima
-        camera.up.set(0, 0, 1); // Define Z como up
+        camera.position.set(0, 0, 8); // Posição frontal (x = 0 degrees rotation)
+        camera.up.set(0, 1, 0); // Define Y como up (padrão)
         camera.lookAt(0, 0, 0); // Olha para o centro da cena
         activeCameraRef.current = camera; // Armazena câmera principal como ativa
 
@@ -1135,6 +1135,7 @@ export default function Scene({ modelPaths, texturePath }: SceneProps) {
                   
                   points.scale.setScalar(scale);
                   points.position.set(0, 0, 0); // Nasce na origem
+                  points.rotation.set(Math.PI / 2, Math.PI, 0); // x = 90°, y = 180°
                 }
 
                 console.log('➕ Adicionando PLY à cena:', fileName, '| Total objetos na cena antes:', scene.children.length);
